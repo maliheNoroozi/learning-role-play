@@ -1,4 +1,4 @@
-import { sendRoleplayMessage } from "@/lib/api";
+import { sendMessage } from "@/lib/api";
 import { DEFAULT_ROLEPLAY } from "@/lib/roleplay-defaults";
 import { ChatMessage } from "@/lib/types";
 import { createMessageId } from "@/lib/utils";
@@ -66,7 +66,7 @@ export default function useChat(): UseChatReturn {
     });
 
     try {
-      const response = await sendRoleplayMessage(
+      const response = await sendMessage(
         {
           ...DEFAULT_ROLEPLAY,
           learner_message: trimmedInput,
