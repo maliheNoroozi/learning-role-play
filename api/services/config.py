@@ -1,0 +1,3 @@
+CHATGPT_MODEL = "gpt-4o-mini"
+CHATGPT_TEMPERATURE = 0.5
+
