@@ -31,6 +31,8 @@ export default function useChat(): UseChatReturn {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+
   useEffect(() => {
     return () => {
       abortControllerRef.current?.abort();
@@ -46,6 +48,21 @@ export default function useChat(): UseChatReturn {
 
     const trimmedInput = data.input.trim();
     if (!trimmedInput || data.isLoading) return;
+
+    const newMessages: ChatMessage[] = [
+      {
+        id: createMessageId(),
+        role: "learner",
+        content: trimmedInput,
+      },
+      {
+        id: createMessageId(),
+        role: "ai_character",
+        content: "",
+      },
+    ];
+
+    setMessages((prev) => [...prev, ...newMessages]);
 
     abortControllerRef.current?.abort();
     const abortController = new AbortController();
