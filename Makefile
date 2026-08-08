@@ -22,7 +22,7 @@ clean:
 	rm -rf .coverage*
 
 run_backend:
-	set -a; source .env; set +a; uv run uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+	set -a; source .env; set +a; uv run uvicorn api.main:app --reload --host 0.0.0.0 --port 9000
 
 run_frontend:
 	cd frontend && pnpm dev
