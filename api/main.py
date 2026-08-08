@@ -19,7 +19,6 @@ app.add_middleware(
 
 app.include_router(roleplay_router)
 
-
 @app.get("/health")
-def health() -> dict[str, str]:
+async def health() -> dict[str, str]:
     return {"status": "ok"}
