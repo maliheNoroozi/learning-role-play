@@ -1,6 +1,5 @@
-import type { RoleplayRequest, RoleplayResponse } from "./types";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import type { RoleplayRequest, RoleplayResponse } from "@/lib/types";
+import { API_URL } from "@/lib/constants";
 
 export async function sendMessage(
   payload: RoleplayRequest,
