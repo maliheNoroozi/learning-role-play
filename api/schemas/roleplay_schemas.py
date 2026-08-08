@@ -1,8 +1,15 @@
 from pydantic import BaseModel, Field
 from typing import Literal
 
+EndingCondition = Literal[
+    "goals_achieved",
+    "profanity",
+    "conversation_exhausted",
+    'irrelevant',
+    "none",
+]
 
-class ConversationTurn(BaseModel):
+class ConversationMessage(BaseModel):
     role: Literal['learner', 'ai_character'] = Field(
         ...,
         description="Speaker role: 'learner' or 'ai_character'.",
@@ -47,9 +54,66 @@ class RoleplayRequest(BaseModel):
         description="Personality traits and tone for the AI character.",
         examples=["Friendly but persuasive, focused on closing the deal."],
     )
-    conversation_history: list[ConversationTurn] = Field(
+    conversation_history: list[ConversationMessage] = Field(
         default_factory=list,
         description="Prior turns in the conversation, oldest first.",
+    )
+
+
+class GoalStatus(BaseModel):
+    goal: str = Field(..., description="The learner goal being evaluated.")
+    achieved: bool = Field(
+        ...,
+        description="True if this goal has been clearly achieved based on learner messages.",
+    )
+    evidence: str = Field(
+        ...,
+        description="Short evidence from learner messages, or why it is not yet achieved.",
+    )
+
+
+class LLMGoalsEvaluation(BaseModel):
+    goal_statuses: list[GoalStatus] = Field(
+        ...,
+        description="Per-goal achievement status based on learner messages.",
+    )
+    rationale: str = Field(
+        ...,
+        description="Brief summary of the goals evaluation.",
+    )
+
+
+class GoalsEvaluation(LLMGoalsEvaluation):
+    all_goals_achieved: bool = Field(
+        ...,
+        description="True only if every learner goal has been achieved.",
+    )
+
+
+class EndingEvaluation(BaseModel):
+    goals_achieved: bool = Field(
+        ...,
+        description="Must match the provided goals evaluation all_goals_achieved result.",
+    )
+    learner_used_profanity: bool = Field(
+        ...,
+        description="True if the learner used swear words or other profane/offensive language.",
+    )
+    conversation_exhausted: bool = Field(
+        ...,
+        description="True if the conversation is stuck, looping, or naturally concluded.",
+    )
+    should_end: bool = Field(
+        ...,
+        description="True if the roleplay should end based on any ending condition.",
+    )
+    ending_condition: EndingCondition = Field(
+        ...,
+        description="Primary ending condition, or 'none' if the conversation should continue.",
+    )
+    rationale: str = Field(
+        ...,
+        description="Brief explanation of the evaluation.",
     )
 
 
@@ -61,4 +125,16 @@ class RoleplayResponse(BaseModel):
     ai_response: str = Field(
         ...,
         description="The AI character's reply to the learner's message.",
+    )
+    should_end: bool = Field(
+        ...,
+        description="Whether the roleplay conversation should end.",
+    )
+    ending_condition: EndingCondition = Field(
+        ...,
+        description="Primary reason the conversation should end, or 'none'.",
+    )
+    ending_rationale: str = Field(
+        ...,
+        description="Brief explanation of the ending evaluation.",
     )
