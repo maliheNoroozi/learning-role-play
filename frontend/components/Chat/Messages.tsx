@@ -31,7 +31,7 @@ export default function Messages({ messages, isLoading }: MessagesProps) {
                     className={
                       isLearner
                         ? "max-w-[85%] rounded-lg bg-[#f4f4f4] px-4 py-3 text-base leading-6 text-foreground dark:bg-[#303030]"
-                        : "w-full rounded-2xl bg-transparent px-4 py-3 text-sm leading-6 text-foreground"
+                        : "w-full rounded-2xl bg-transparent px-4 py-3 text-base leading-6 text-foreground"
                     }
                   >
                     <p className="whitespace-pre-wrap">{message.content}</p>
