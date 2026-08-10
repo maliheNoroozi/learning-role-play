@@ -90,11 +90,7 @@ class GoalsEvaluation(LLMGoalsEvaluation):
     )
 
 
-class EndingEvaluation(BaseModel):
-    goals_achieved: bool = Field(
-        ...,
-        description="Must match the provided goals evaluation all_goals_achieved result.",
-    )
+class LLMEndingEvaluation(BaseModel):
     learner_used_profanity: bool = Field(
         ...,
         description="True if the learner used swear words or other profane/offensive language.",
@@ -103,6 +99,24 @@ class EndingEvaluation(BaseModel):
         ...,
         description="True if the conversation is stuck, looping, or naturally concluded.",
     )
+    learner_message_irrelevant: bool = Field(
+        ...,
+        description=(
+            "True if the learner's latest message is clearly irrelevant or "
+            "off-topic for the scenario and roleplay goals."
+        ),
+    )
+    rationale: str = Field(
+        ...,
+        description="Brief explanation of the ending-condition evaluation.",
+    )
+
+
+class EndingEvaluation(LLMEndingEvaluation):
+    goals_achieved: bool = Field(
+        ...,
+        description="True if all learner goals were achieved (from the goals evaluator).",
+    )
     should_end: bool = Field(
         ...,
         description="True if the roleplay should end based on any ending condition.",
@@ -110,10 +124,6 @@ class EndingEvaluation(BaseModel):
     ending_condition: EndingCondition = Field(
         ...,
         description="Primary ending condition, or 'none' if the conversation should continue.",
-    )
-    rationale: str = Field(
-        ...,
-        description="Brief explanation of the evaluation.",
     )
 
 
