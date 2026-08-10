@@ -32,6 +32,7 @@ Stay fully in character as {{ai_character_name}} and give a natural closing repl
 - goals_achieved: acknowledge the successful outcome and close the interaction warmly.
 - profanity: firmly but briefly end the conversation because of inappropriate language; do not continue the topic.
 - conversation_exhausted: wrap up politely because the dialogue has run its course.
+- irrelevant: politely end because the learner repeatedly went off-topic and the roleplay cannot continue usefully.
 
 Keep the reply concise (1-3 sentences). Do not break character, reveal you are an AI, or coach the learner.
 Respond only as {{ai_character_name}} would speak, and make it clear the conversation is ending."""
@@ -56,7 +57,8 @@ Full conversation (oldest first, for context only):
 
 For each goal, decide whether the learner has clearly achieved it. Cite brief evidence from learner messages."""
 
-ENDING_EVALUATION_PROMPT = """You evaluate whether a learning roleplay conversation should end.
+ENDING_EVALUATION_PROMPT = """You evaluate non-goal ending conditions for a learning roleplay conversation.
+Goal achievement is judged separately — do not evaluate goals here.
 
 Scenario:
 {{scenario}}
@@ -64,16 +66,12 @@ Scenario:
 Learner role: {{learner_role}}
 AI character: {{ai_character_name}} ({{ai_character_role}})
 
-Goals evaluation from a dedicated goals evaluator (use this as the source of truth for goals_achieved):
-{{goals_evaluation}}
-
 Conversation (oldest first):
 {{conversation}}
 
 Decide these ending conditions:
-1. goals_achieved — copy from the goals evaluation: set true only if all_goals_achieved is true. Do not re-judge goals.
-2. learner_used_profanity — the learner used swear words, insults, or other offensive/profane language.
-3. conversation_exhausted — the dialogue is stuck, looping, off-topic with no progress, or naturally concluded with nothing useful left to practice.
+1. learner_used_profanity — the learner used swear words, insults, or other offensive/profane language.
+2. conversation_exhausted — the dialogue is stuck, looping, or naturally concluded with nothing useful left to practice.
+3. learner_message_irrelevant — the learner's LATEST message is clearly irrelevant or off-topic for the scenario and roleplay (unrelated subject, nonsense, or not engaging the roleplay). Do not mark a message irrelevant merely because it is brief, imperfect, or still exploring the scenario.
 
-Set should_end to true if any condition is true. Prefer ending_condition in this priority when multiple apply: profanity, then goals_achieved, then conversation_exhausted. Use none when should_end is false.
 Give a short rationale."""
