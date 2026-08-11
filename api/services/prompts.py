@@ -47,13 +47,10 @@ Scenario:
 Learner role: {{learner_role}}
 
 Learner goals:
-{{goals}}
+{{learner_goals}}
 
 Learner messages (oldest first):
 {{learner_messages}}
-
-Full conversation (oldest first, for context only):
-{{conversation}}
 
 For each goal, decide whether the learner has clearly achieved it. Cite brief evidence from learner messages."""
 
