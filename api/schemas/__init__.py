@@ -1,3 +1,19 @@
-from api.schemas.roleplay_schemas import RoleplayRequest, RoleplayResponse
+from api.schemas.roleplay_schemas import (
+    ConversationMessage,
+    CreateRoleplayRequest,
+    CreateRoleplayResponse,
+    RoleplayChatRequest,
+    RoleplayChatResponse,
+    RoleplaySession,
+    RoleplaySetup,
+)
 
-__all__ = ["RoleplayRequest", "RoleplayResponse"]
+__all__ = [
+    "ConversationMessage",
+    "CreateRoleplayRequest",
+    "CreateRoleplayResponse",
+    "RoleplayChatRequest",
+    "RoleplayChatResponse",
+    "RoleplaySession",
+    "RoleplaySetup",
+]
