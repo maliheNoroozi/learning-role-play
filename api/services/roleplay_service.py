@@ -1,6 +1,7 @@
 import os
 from functools import lru_cache
 from typing import Annotated
+from uuid import uuid4
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import PromptTemplate
@@ -11,14 +12,18 @@ from typing_extensions import NotRequired, TypedDict
 
 from api.schemas.roleplay_schemas import (
     ConversationMessage,
+    CreateRoleplayRequest,
+    CreateRoleplayResponse,
     EndingCondition,
     EndingEvaluation,
     GoalsEvaluation,
-    LLMEndingEvaluation,
-    LLMGoalsEvaluation,
-    RoleplayRequest,
-    RoleplayResponse,
+    RawEndingEvaluation,
+    RawGoalsEvaluation,
+    RoleplayChatRequest,
+    RoleplayChatResponse,
+    RoleplaySession,
 )
+from api.services.cache.roleplay_cache import get_roleplay_cache
 from api.services.config import CHATGPT_MODEL, CHATGPT_TEMPERATURE, IRRELEVANT_MESSAGE_LIMIT
 from api.services.prompts import (
     ENDING_EVALUATION_PROMPT,
@@ -26,6 +31,10 @@ from api.services.prompts import (
     ROLEPLAY_ENDING_SYSTEM_PROMPT,
     ROLEPLAY_SYSTEM_PROMPT,
 )
+
+
+class RoleplayEndedError(RuntimeError):
+    """Raised when a learner tries to chat in an already-ended session."""
 
 
 class State(TypedDict):
@@ -37,11 +46,10 @@ class State(TypedDict):
     ai_character_role: str
     ai_character_personality: str
     irrelevant_message_count: int
+    all_goals_achieved: bool
     goals_evaluation: NotRequired[GoalsEvaluation]
-    llm_ending_evaluation: NotRequired[LLMEndingEvaluation]
     ending_evaluation: NotRequired[EndingEvaluation]
-    normal_response: NotRequired[str]
-    ending_response: NotRequired[str]
+    ai_response: NotRequired[str]
 
 
 @lru_cache
@@ -69,43 +77,65 @@ class RoleplayService:
             api_key=api_key,
         )
         self.goals_evaluator_llm = evaluator_base.with_structured_output(
-            LLMGoalsEvaluation,
+            RawGoalsEvaluation,
             method="json_schema",
             strict=True,
         )
         self.ending_evaluator_llm = evaluator_base.with_structured_output(
-            LLMEndingEvaluation,
+            RawEndingEvaluation,
             method="json_schema",
             strict=True,
         )
         self.graph = self._build_graph()
+        self.cache = get_roleplay_cache()
+
+    def create_roleplay(self, request: CreateRoleplayRequest) -> CreateRoleplayResponse:
+        session = RoleplaySession(
+            roleplay_id=str(uuid4()),
+            **request.model_dump(),
+        )
+        self.cache.save_session(session)
+        return CreateRoleplayResponse(roleplay_id=session.roleplay_id)
 
     def _build_graph(self):
         def evaluate_goals(state: State):
-            """Evaluate goal achievement from learner messages."""
+            """Ask the LLM whether learner goals are achieved; store all_goals_achieved."""
             prompt = PromptTemplate.from_template(
                 GOALS_EVALUATION_PROMPT,
                 template_format="jinja2",
             ).format(
                 scenario=state["scenario"],
                 learner_role=state["learner_role"],
-                goals=RoleplayService._format_goals(learner_goals=state["learner_goals"]),
+                learner_goals=RoleplayService._format_goals(state["learner_goals"]),
                 learner_messages=self._format_learner_messages(state["messages"]),
-                conversation=self._format_conversation(state["messages"]),
             )
             llm_evaluation = self.goals_evaluator_llm.invoke(
                 [SystemMessage(content=prompt)]
             )
-            evaluation = GoalsEvaluation(
-                **llm_evaluation.model_dump(),
-                all_goals_achieved=all(
-                    status.achieved for status in llm_evaluation.goal_statuses
-                ),
+            all_goals_achieved = all(
+                status.achieved for status in llm_evaluation.goal_statuses
             )
-            return {"goals_evaluation": evaluation}
+            goals_evaluation = GoalsEvaluation(
+                **llm_evaluation.model_dump(),
+                all_goals_achieved=all_goals_achieved,
+            )
+            return {
+                "goals_evaluation": goals_evaluation,
+                "all_goals_achieved": all_goals_achieved,
+            }
 
         def evaluate_ending(state: State):
-            """Evaluate profanity, exhaustion, and irrelevant-message ending conditions."""
+            """
+            Decide the single ending_evaluation for this turn.
+
+            Priority: goals_achieved > non-goal conditions (profanity / irrelevant / exhausted).
+            """
+            if state.get("all_goals_achieved"):
+                goals = state.get("goals_evaluation")
+                return {
+                    "ending_evaluation": RoleplayService._ending_from_goals(goals),
+                }
+
             prompt = PromptTemplate.from_template(
                 ENDING_EVALUATION_PROMPT,
                 template_format="jinja2",
@@ -116,21 +146,28 @@ class RoleplayService:
                 ai_character_role=state["ai_character_role"],
                 conversation=self._format_conversation(state["messages"]),
             )
-            evaluation = self.ending_evaluator_llm.invoke(
+            llm_evaluation = self.ending_evaluator_llm.invoke(
                 [SystemMessage(content=prompt)]
             )
-            previous_count_of_irrelevant_messages = state.get("irrelevant_message_count", 0)
-            irrelevant_message_count = previous_count_of_irrelevant_messages + (
-                1 if evaluation.learner_message_irrelevant else 0
+            previous_count = state.get("irrelevant_message_count", 0)
+            irrelevant_message_count = previous_count + (
+                1 if llm_evaluation.learner_message_irrelevant else 0
+            )
+            ending_evaluation = RoleplayService._ending_from_non_goal(
+                llm_evaluation,
+                irrelevant_message_count=irrelevant_message_count,
             )
             return {
-                "llm_ending_evaluation": evaluation,
                 "irrelevant_message_count": irrelevant_message_count,
+                "ending_evaluation": ending_evaluation,
             }
 
         def generate_normal_response(state: State):
             """Generate a normal in-character reply."""
-            system_prompt = self._build_normal_system_prompt(state)
+            system_prompt = PromptTemplate.from_template(
+                ROLEPLAY_SYSTEM_PROMPT,
+                template_format="jinja2",
+            ).format(**RoleplayService._shared_prompt_args(state))
             response = self.llm.invoke(
                 [SystemMessage(content=system_prompt), *state["messages"]]
             )
@@ -139,12 +176,19 @@ class RoleplayService:
                 if isinstance(response.content, str)
                 else str(response.content)
             )
-            return {"normal_response": content}
+            return {"ai_response": content}
 
         def generate_ending_response(state: State):
-            """Generate a closing reply based on resolved ending evaluation."""
-            ending = self._resolve_ending_evaluation(state)
-            system_prompt = self._build_ending_system_prompt(state, ending)
+            """Generate a closing reply for whatever ending reason triggered this node."""
+            ending_evaluation = state["ending_evaluation"]
+            system_prompt = PromptTemplate.from_template(
+                ROLEPLAY_ENDING_SYSTEM_PROMPT,
+                template_format="jinja2",
+            ).format(
+                **RoleplayService._shared_prompt_args(state),
+                ending_condition=ending_evaluation.ending_condition,
+                ending_rationale=ending_evaluation.rationale,
+            )
             response = self.llm.invoke(
                 [SystemMessage(content=system_prompt), *state["messages"]]
             )
@@ -153,29 +197,11 @@ class RoleplayService:
                 if isinstance(response.content, str)
                 else str(response.content)
             )
-            return {
-                "ending_response": content,
-                "ending_evaluation": ending,
-            }
+            return {"ai_response": content}
 
-        def route_after_goals(state: State) -> str:
-            """Route to generate an ending response if all goals are achieved."""
-            goals_evaluation = state.get("goals_evaluation")
-            if goals_evaluation and goals_evaluation.all_goals_achieved:
-                return "generate_ending_response"
-            return "generate_normal_response"
-
-        def route_after_ending(state: State) -> str:
-            """Route to ending response for profanity, exhaustion, or repeated irrelevance."""
-            ending_evaluation = state.get("llm_ending_evaluation")
-            irrelevant_limit_reached = (
-                state.get("irrelevant_message_count", 0) >= IRRELEVANT_MESSAGE_LIMIT
-            )
-            if ending_evaluation and (
-                ending_evaluation.learner_used_profanity
-                or ending_evaluation.conversation_exhausted
-                or irrelevant_limit_reached
-            ):
+        def route_after_evaluation(state: State) -> str:
+            ending_evaluation = state.get("ending_evaluation")
+            if ending_evaluation and ending_evaluation.should_end:
                 return "generate_ending_response"
             return "generate_normal_response"
 
@@ -186,103 +212,128 @@ class RoleplayService:
         builder.add_node("generate_ending_response", generate_ending_response)
 
         builder.add_edge(START, "evaluate_goals")
-        builder.add_edge(START, "evaluate_ending")
-        builder.add_conditional_edges(
-            "evaluate_goals",
-            route_after_goals,
-            ["generate_ending_response", "generate_normal_response"],
-        )
+        builder.add_edge("evaluate_goals", "evaluate_ending")
         builder.add_conditional_edges(
             "evaluate_ending",
-            route_after_ending,
+            route_after_evaluation,
             ["generate_ending_response", "generate_normal_response"],
         )
         builder.add_edge("generate_normal_response", END)
         builder.add_edge("generate_ending_response", END)
         return builder.compile()
 
-    def generate_response(self, request: RoleplayRequest) -> RoleplayResponse:
-        messages = self._to_langchain_messages(request.conversation_history)
-        messages.append(HumanMessage(content=request.learner_message))
+    def generate_response(self, request: RoleplayChatRequest) -> RoleplayChatResponse:
+        with self.cache.lock(request.roleplay_id):
+            session = self.cache.get_session(request.roleplay_id)
+            if session.should_end:
+                raise RoleplayEndedError(request.roleplay_id)
 
-        result = self.graph.invoke(
-            {
-                "messages": messages,
-                "scenario": request.scenario,
-                "learner_role": request.learner_role,
-                "learner_goals": request.learner_goals,
-                "ai_character_name": request.ai_character_name,
-                "ai_character_role": request.ai_character_role,
-                "ai_character_personality": request.ai_character_personality,
-                "irrelevant_message_count": 0,
-            }
-        )
+            messages = self._to_langchain_messages(session.conversation_history)
+            messages.append(HumanMessage(content=request.learner_message))
 
-        evaluation = result.get("ending_evaluation")
-        if not isinstance(evaluation, EndingEvaluation):
-            evaluation = self._resolve_ending_evaluation(result)
+            result = self.graph.invoke(
+                {
+                    "messages": messages,
+                    "scenario": session.scenario,
+                    "learner_role": session.learner_role,
+                    "learner_goals": session.learner_goals,
+                    "ai_character_name": session.ai_character_name,
+                    "ai_character_role": session.ai_character_role,
+                    "ai_character_personality": session.ai_character_personality,
+                    "irrelevant_message_count": session.irrelevant_message_count,
+                    "all_goals_achieved": False,
+                }
+            )
 
-        if evaluation.should_end:
-            ai_response = result.get("ending_response") or result.get("normal_response", "")
-        else:
-            ai_response = result.get("normal_response") or result.get("ending_response", "")
+            ai_response = result.get("ai_response", "")
 
-        return RoleplayResponse(
-            ai_character_name=request.ai_character_name,
-            ai_response=ai_response,
-            should_end=evaluation.should_end,
-            ending_condition=evaluation.ending_condition,
-            ending_rationale=evaluation.rationale,
+            ending_evaluation = result.get("ending_evaluation")
+            if not isinstance(ending_evaluation, EndingEvaluation):
+                ending_evaluation = EndingEvaluation(
+                    learner_used_profanity=False,
+                    conversation_exhausted=False,
+                    learner_message_irrelevant=False,
+                    rationale="",
+                    should_end=False,
+                    ending_condition="none",
+                )
+
+            session.conversation_history.extend(
+                [
+                    ConversationMessage(
+                        role="learner",
+                        content=request.learner_message,
+                    ),
+                    ConversationMessage(
+                        role="ai_character",
+                        content=ai_response,
+                    ),
+                ]
+            )
+            session.irrelevant_message_count = int(
+                result.get("irrelevant_message_count", session.irrelevant_message_count)
+            )
+            session.should_end = ending_evaluation.should_end
+            self.cache.save_session(session)
+
+            return RoleplayChatResponse(
+                roleplay_id=session.roleplay_id,
+                ai_response=ai_response,
+                should_end=ending_evaluation.should_end,
+                ending_condition=ending_evaluation.ending_condition,
+                ending_rationale=(
+                    ending_evaluation.rationale if ending_evaluation.should_end else None
+                ),
+            )
+
+    @staticmethod
+    def _ending_from_goals(goals: GoalsEvaluation | None) -> EndingEvaluation:
+        """Build an ending evaluation when all learner goals are achieved."""
+        return EndingEvaluation(
+            learner_used_profanity=False,
+            conversation_exhausted=False,
+            learner_message_irrelevant=False,
+            rationale=goals.rationale if goals is not None else "",
+            should_end=True,
+            ending_condition="goals_achieved",
         )
 
     @staticmethod
-    def _resolve_ending_evaluation(state: State) -> EndingEvaluation:
-        goals = state.get("goals_evaluation")
-        ending = state.get("llm_ending_evaluation")
-        goals_achieved = bool(goals and goals.all_goals_achieved)
-        learner_used_profanity = bool(ending and ending.learner_used_profanity)
-        conversation_exhausted = bool(ending and ending.conversation_exhausted)
-        learner_message_irrelevant = bool(
-            ending and ending.learner_message_irrelevant
-        )
-        irrelevant_limit_reached = (
-            state.get("irrelevant_message_count", 0) >= IRRELEVANT_MESSAGE_LIMIT
-        )
+    def _ending_from_non_goal(
+        raw: RawEndingEvaluation,
+        *,
+        irrelevant_message_count: int,
+    ) -> EndingEvaluation:
+        """Turn non-goal LLM signals into a should_end decision (goals not involved)."""
+        irrelevant_limit_reached = irrelevant_message_count >= IRRELEVANT_MESSAGE_LIMIT
         should_end = (
-            goals_achieved
-            or learner_used_profanity
-            or conversation_exhausted
+            raw.learner_used_profanity
+            or raw.conversation_exhausted
             or irrelevant_limit_reached
         )
 
         ending_condition: EndingCondition = "none"
-        if learner_used_profanity:
+        if raw.learner_used_profanity:
             ending_condition = "profanity"
-        elif goals_achieved:
-            ending_condition = "goals_achieved"
         elif irrelevant_limit_reached:
             ending_condition = "irrelevant"
-        elif conversation_exhausted:
+        elif raw.conversation_exhausted:
             ending_condition = "conversation_exhausted"
 
-        rationale_parts: list[str] = []
-        if ending and ending.rationale:
-            rationale_parts.append(ending.rationale)
-        if goals and goals.rationale:
-            rationale_parts.append(goals.rationale)
+        rationale = raw.rationale
         if irrelevant_limit_reached:
-            rationale_parts.append(
+            limit_note = (
                 f"Learner sent {IRRELEVANT_MESSAGE_LIMIT} irrelevant messages."
             )
+            rationale = f"{rationale} {limit_note}".strip() if rationale else limit_note
 
         return EndingEvaluation(
-            goals_achieved=goals_achieved,
-            learner_used_profanity=learner_used_profanity,
-            conversation_exhausted=conversation_exhausted,
-            learner_message_irrelevant=learner_message_irrelevant,
+            learner_used_profanity=raw.learner_used_profanity,
+            conversation_exhausted=raw.conversation_exhausted,
+            learner_message_irrelevant=raw.learner_message_irrelevant,
+            rationale=rationale,
             should_end=should_end,
             ending_condition=ending_condition,
-            rationale=" ".join(rationale_parts),
         )
 
     @staticmethod
@@ -293,26 +344,8 @@ class RoleplayService:
             "ai_character_personality": state["ai_character_personality"],
             "scenario": state["scenario"],
             "learner_role": state["learner_role"],
-            "goals": RoleplayService._format_goals(learner_goals=state["learner_goals"]),
+            "goals": RoleplayService._format_goals(state["learner_goals"]),
         }
-
-    @classmethod
-    def _build_normal_system_prompt(cls, state: State) -> str:
-        return PromptTemplate.from_template(
-            ROLEPLAY_SYSTEM_PROMPT,
-            template_format="jinja2",
-        ).format(**cls._shared_prompt_args(state))
-
-    @classmethod
-    def _build_ending_system_prompt(cls, state: State, ending: EndingEvaluation) -> str:
-        return PromptTemplate.from_template(
-            ROLEPLAY_ENDING_SYSTEM_PROMPT,
-            template_format="jinja2",
-        ).format(
-            **cls._shared_prompt_args(state),
-            ending_condition=ending.ending_condition,
-            ending_rationale=ending.rationale,
-        )
 
     @staticmethod
     def _format_goals(learner_goals: list[str]) -> str:
