@@ -1,6 +1,5 @@
 import type { ChangeEvent, RefObject, SubmitEvent, KeyboardEvent } from "react";
 import { CircleArrowUp } from "lucide-react";
-import { DEFAULT_ROLEPLAY } from "@/lib/roleplay-defaults";
 import { Button, Textarea } from "@/components/ui";
 
 type ChatFormProps = {
@@ -8,6 +7,8 @@ type ChatFormProps = {
   isLoading: boolean;
   error: string | null;
   isEmpty: boolean;
+  shouldEnd?: boolean;
+  learnerRole: string;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
   onSubmit: (event: SubmitEvent<HTMLFormElement>) => Promise<void>;
@@ -18,6 +19,8 @@ export default function ChatForm({
   isLoading,
   error,
   isEmpty,
+  shouldEnd = false,
+  learnerRole,
   inputRef,
   onChange,
   onSubmit,
@@ -37,8 +40,8 @@ export default function ChatForm({
             Start the conversation
           </h1>
           <p className="mt-2 text-base font-normal text-muted-foreground">
-            You are playing {DEFAULT_ROLEPLAY.learner_role.toLowerCase()}. Send
-            a message to begin.
+            You are playing {learnerRole.toLowerCase()}. Send a message to
+            begin.
           </p>
         </div>
       ) : null}
@@ -52,7 +55,7 @@ export default function ChatForm({
             value={input}
             onChange={onChange}
             onKeyDown={handleKeyDown}
-            disabled={isLoading}
+            disabled={isLoading || shouldEnd}
           />
           <Button
             type="submit"
@@ -60,7 +63,7 @@ export default function ChatForm({
             size="icon-sm"
             aria-label="Send message"
             className="absolute right-2 bottom-2 cursor-pointer rounded-full text-muted-foreground"
-            disabled={isLoading || input.trim().length === 0}
+            disabled={isLoading || shouldEnd || input.trim().length === 0}
           >
             <CircleArrowUp className="size-6" />
           </Button>

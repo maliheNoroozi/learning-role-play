@@ -1,6 +1,7 @@
+"use client";
+
 import { sendMessage } from "@/lib/api";
-import { DEFAULT_ROLEPLAY } from "@/lib/roleplay-defaults";
-import { ChatMessage } from "@/lib/types";
+import type { ChatMessage, EndingCondition } from "@/lib/types";
 import { createMessageId } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, RefObject, SubmitEvent } from "react";
@@ -10,6 +11,9 @@ interface UseChatData {
   messages: ChatMessage[];
   isLoading: boolean;
   error: string | null;
+  shouldEnd: boolean;
+  endingCondition: EndingCondition | null;
+  endingRationale: string | null;
 }
 
 interface UseChatReturn {
@@ -24,14 +28,15 @@ const initialData: UseChatData = {
   messages: [],
   isLoading: false,
   error: null,
+  shouldEnd: false,
+  endingCondition: null,
+  endingRationale: null,
 };
 
-export default function useChat(): UseChatReturn {
+export default function useChat(roleplayId: string): UseChatReturn {
   const [data, setData] = useState<UseChatData>(initialData);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   useEffect(() => {
     return () => {
@@ -47,26 +52,7 @@ export default function useChat(): UseChatReturn {
     event.preventDefault();
 
     const trimmedInput = data.input.trim();
-    if (!trimmedInput || data.isLoading) return;
-
-    const newMessages: ChatMessage[] = [
-      {
-        id: createMessageId(),
-        role: "learner",
-        content: trimmedInput,
-      },
-      {
-        id: createMessageId(),
-        role: "ai_character",
-        content: "",
-      },
-    ];
-
-    setMessages((prev) => [...prev, ...newMessages]);
-
-    abortControllerRef.current?.abort();
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
+    if (!trimmedInput || data.isLoading || data.shouldEnd) return;
 
     const learnerMessage: ChatMessage = {
       id: createMessageId(),
@@ -76,21 +62,22 @@ export default function useChat(): UseChatReturn {
 
     const nextMessages = [...data.messages, learnerMessage];
     setData({
+      ...data,
       input: "",
       messages: nextMessages,
       isLoading: true,
       error: null,
     });
 
+    abortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     try {
       const response = await sendMessage(
         {
-          ...DEFAULT_ROLEPLAY,
+          roleplay_id: roleplayId,
           learner_message: trimmedInput,
-          conversation_history: nextMessages.slice(0, -1).map((message) => ({
-            role: message.role,
-            content: message.content,
-          })),
         },
         abortController.signal,
       );
@@ -107,6 +94,9 @@ export default function useChat(): UseChatReturn {
         ],
         isLoading: false,
         error: null,
+        shouldEnd: response.should_end,
+        endingCondition: response.ending_condition,
+        endingRationale: response.ending_rationale,
       }));
     } catch (submitError) {
       if (abortController.signal.aborted) return;
