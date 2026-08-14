@@ -69,6 +69,4 @@ Conversation (oldest first):
 Decide these ending conditions:
 1. learner_used_profanity — the learner used swear words, insults, or other offensive/profane language.
 2. conversation_exhausted — the dialogue is stuck, looping, or naturally concluded with nothing useful left to practice.
-3. learner_message_irrelevant — the learner's LATEST message is clearly irrelevant or off-topic for the scenario and roleplay (unrelated subject, nonsense, or not engaging the roleplay). Do not mark a message irrelevant merely because it is brief, imperfect, or still exploring the scenario.
-
-Give a short rationale."""
+3. learner_message_irrelevant — the learner's LATEST message is clearly irrelevant or off-topic for the scenario and roleplay (unrelated subject, nonsense, or not engaging the roleplay). Do not mark a message irrelevant merely because it is brief, imperfect, or still exploring the scenario."""
