@@ -4,19 +4,30 @@ import { useState } from "react";
 import type { ChangeEvent, KeyboardEvent } from "react";
 import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
 import { Button, Input } from "@/components/ui";
-import { createMessageId } from "@/lib/utils";
 
 type GoalItem = {
   id: string;
   text: string;
 };
 
-type GoalsFieldProps = {
-  goals: GoalItem[];
-  onChange: (goals: GoalItem[]) => void;
+type RoleplayGoalsFieldProps = {
+  defaultGoals?: string[];
+  error?: string;
+  disabled?: boolean;
 };
 
-export default function GoalsField({ goals, onChange }: GoalsFieldProps) {
+function createGoalId() {
+  return crypto.randomUUID();
+}
+
+export default function RoleplayFormGoalsField({
+  defaultGoals = [],
+  error,
+  disabled = false,
+}: RoleplayGoalsFieldProps) {
+  const [items, setItems] = useState<GoalItem[]>(() =>
+    defaultGoals.map((text) => ({ id: createGoalId(), text })),
+  );
   const [draft, setDraft] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
@@ -25,7 +36,7 @@ export default function GoalsField({ goals, onChange }: GoalsFieldProps) {
     const text = draft.trim();
     if (!text) return;
 
-    onChange([...goals, { id: createMessageId(), text }]);
+    setItems((current) => [...current, { id: createGoalId(), text }]);
     setDraft("");
   };
 
@@ -35,9 +46,9 @@ export default function GoalsField({ goals, onChange }: GoalsFieldProps) {
     addGoal();
   };
 
-  const startEdit = (goal: GoalItem) => {
-    setEditingId(goal.id);
-    setEditDraft(goal.text);
+  const startEdit = (id: string, text: string) => {
+    setEditingId(id);
+    setEditDraft(text);
   };
 
   const cancelEdit = () => {
@@ -45,20 +56,23 @@ export default function GoalsField({ goals, onChange }: GoalsFieldProps) {
     setEditDraft("");
   };
 
-  const saveEdit = () => {
+  const saveEdit = (id: string) => {
     const text = editDraft.trim();
-    if (!text || !editingId) return;
+    if (!text) return;
 
-    onChange(
-      goals.map((goal) => (goal.id === editingId ? { ...goal, text } : goal)),
+    setItems((current) =>
+      current.map((item) => (item.id === id ? { ...item, text } : item)),
     );
     cancelEdit();
   };
 
-  const handleEditKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+  const handleEditKeyDown = (
+    event: KeyboardEvent<HTMLInputElement>,
+    id: string,
+  ) => {
     if (event.key === "Enter") {
       event.preventDefault();
-      saveEdit();
+      saveEdit(id);
       return;
     }
     if (event.key === "Escape") {
@@ -67,14 +81,18 @@ export default function GoalsField({ goals, onChange }: GoalsFieldProps) {
     }
   };
 
-  const deleteGoal = (id: string) => {
-    onChange(goals.filter((goal) => goal.id !== id));
-    if (editingId === id) cancelEdit();
-  };
-
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-sm font-medium">Your goals</span>
+
+      {items.map((item) => (
+        <input
+          key={item.id}
+          type="hidden"
+          name="learner_goals"
+          value={item.text}
+        />
+      ))}
 
       <div className="relative flex items-center gap-2">
         <Input
@@ -85,6 +103,8 @@ export default function GoalsField({ goals, onChange }: GoalsFieldProps) {
           }
           onKeyDown={handleDraftKeyDown}
           aria-label="New goal"
+          aria-invalid={Boolean(error)}
+          disabled={disabled}
         />
         <Button
           type="button"
@@ -93,20 +113,20 @@ export default function GoalsField({ goals, onChange }: GoalsFieldProps) {
           aria-label="Add goal"
           className="shrink-0"
           onClick={addGoal}
-          disabled={draft.trim().length === 0}
+          disabled={disabled || draft.trim().length === 0}
         >
           <Plus />
         </Button>
       </div>
 
-      {goals.length > 0 ? (
+      {items.length > 0 ? (
         <ul className="mt-2 flex flex-col gap-2">
-          {goals.map((goal) => {
-            const isEditing = editingId === goal.id;
+          {items.map((item) => {
+            const isEditing = editingId === item.id;
 
             return (
               <li
-                key={goal.id}
+                key={item.id}
                 className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-1.5"
               >
                 {isEditing ? (
@@ -116,18 +136,19 @@ export default function GoalsField({ goals, onChange }: GoalsFieldProps) {
                       onChange={(event: ChangeEvent<HTMLInputElement>) =>
                         setEditDraft(event.target.value)
                       }
-                      onKeyDown={handleEditKeyDown}
+                      onKeyDown={(event) => handleEditKeyDown(event, item.id)}
                       aria-label="Edit goal"
                       className="h-8"
                       autoFocus
+                      disabled={disabled}
                     />
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon-sm"
                       aria-label="Save goal"
-                      onClick={saveEdit}
-                      disabled={editDraft.trim().length === 0}
+                      onClick={() => saveEdit(item.id)}
+                      disabled={disabled || editDraft.trim().length === 0}
                     >
                       <Check />
                     </Button>
@@ -137,6 +158,7 @@ export default function GoalsField({ goals, onChange }: GoalsFieldProps) {
                       size="icon-sm"
                       aria-label="Cancel edit"
                       onClick={cancelEdit}
+                      disabled={disabled}
                     >
                       <X />
                     </Button>
@@ -144,14 +166,15 @@ export default function GoalsField({ goals, onChange }: GoalsFieldProps) {
                 ) : (
                   <>
                     <span className="min-w-0 flex-1 text-sm leading-5">
-                      {goal.text}
+                      {item.text}
                     </span>
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon-sm"
                       aria-label="Edit goal"
-                      onClick={() => startEdit(goal)}
+                      onClick={() => startEdit(item.id, item.text)}
+                      disabled={disabled}
                     >
                       <Pencil />
                     </Button>
@@ -160,7 +183,13 @@ export default function GoalsField({ goals, onChange }: GoalsFieldProps) {
                       variant="ghost"
                       size="icon-sm"
                       aria-label="Delete goal"
-                      onClick={() => deleteGoal(goal.id)}
+                      onClick={() => {
+                        setItems((current) =>
+                          current.filter((goal) => goal.id !== item.id),
+                        );
+                        if (editingId === item.id) cancelEdit();
+                      }}
+                      disabled={disabled}
                     >
                       <Trash2 />
                     </Button>
@@ -175,8 +204,8 @@ export default function GoalsField({ goals, onChange }: GoalsFieldProps) {
           Press Enter or click + to add a goal.
         </span>
       )}
+
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }
-
-export type { GoalItem };
