@@ -1,35 +1,45 @@
+export type EndingCondition =
+  | "goals_achieved"
+  | "profanity"
+  | "conversation_exhausted"
+  | "irrelevant"
+  | "none";
+
 export type ConversationMessage = {
   role: "learner" | "ai_character";
   content: string;
 };
 
-export type RoleplayRequest = {
+export type RoleplaySetup = {
   scenario: string;
-  learner_goals: string[];
   learner_role: string;
-  learner_message: string;
+  learner_goals: string[];
   ai_character_name: string;
   ai_character_role: string;
   ai_character_personality: string;
-  conversation_history: ConversationMessage[];
 };
 
-export type EndingCondition =
-  | "goals_achieved"
-  | "profanity"
-  | "conversation_exhausted"
-  | "none";
+export type CreateRoleplayRequest = RoleplaySetup;
 
-export type RoleplayResponse = {
-  ai_character_name: string;
+export type CreateRoleplayResponse = {
+  roleplay_id: string;
+};
+
+export type RoleplayChatRequest = {
+  roleplay_id: string;
+  learner_message: string;
+};
+
+export type RoleplayChatResponse = {
+  roleplay_id: string;
   ai_response: string;
   should_end: boolean;
   ending_condition: EndingCondition;
-  ending_rationale: string;
+  ending_rationale: string | null;
 };
 
 export type ChatMessage = {
   id: string;
-  role: "learner" | "ai_character";
+  role: ConversationMessage["role"];
   content: string;
 };

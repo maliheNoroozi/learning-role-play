@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# intermediate OpenAPI JSON used by `make generate-openapi`
+openapi.json

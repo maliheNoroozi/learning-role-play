@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.routers.chat_router import chat_router
 from api.routers.roleplay_router import roleplay_router
 
 app = FastAPI(
@@ -18,6 +19,8 @@ app.add_middleware(
 )
 
 app.include_router(roleplay_router)
+app.include_router(chat_router)
+
 
 @app.get("/health")
 async def health() -> dict[str, str]:
