@@ -94,7 +94,9 @@ class RoleplaySession(RoleplaySetup):
 class CreateRoleplayResponse(BaseModel):
     """Returned after a session is created."""
 
-    roleplay_id: str = Field(..., description="Id of the newly created roleplay session.")
+    roleplay_id: str = Field(
+        ..., description="Id of the newly created roleplay session."
+    )
 
 
 class EndingDecision(BaseModel):
@@ -118,10 +120,6 @@ class GoalStatus(BaseModel):
         ...,
         description="True if this goal has been clearly achieved based on learner messages.",
     )
-    evidence: str = Field(
-        ...,
-        description="Short evidence from learner messages, or why it is not yet achieved.",
-    )
 
 
 class RawGoalsEvaluation(BaseModel):
@@ -130,10 +128,6 @@ class RawGoalsEvaluation(BaseModel):
     goal_statuses: list[GoalStatus] = Field(
         ...,
         description="Per-goal achievement status based on learner messages.",
-    )
-    rationale: str = Field(
-        ...,
-        description="Brief summary of the goals evaluation.",
     )
 
 
@@ -164,14 +158,15 @@ class RawEndingEvaluation(BaseModel):
             "off-topic for the scenario and roleplay goals."
         ),
     )
-    rationale: str = Field(
-        ...,
-        description="Brief explanation of the non-goal ending-condition evaluation.",
-    )
 
 
 class EndingEvaluation(RawEndingEvaluation, EndingDecision):
     """Ending evaluation plus app-computed should_end and ending_condition."""
+
+    rationale: str = Field(
+        default="",
+        description="App-computed rationale for the ending decision.",
+    )
 
 
 class RoleplayChatResponse(EndingDecision):
