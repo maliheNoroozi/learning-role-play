@@ -1,4 +1,4 @@
-.PHONY: ruff_fix_imports ruff_format ruff_lint clean generate-openapi run_backend run_frontend dev
+.PHONY: ruff_fix_imports ruff_format ruff_lint clean generate_openapi run_backend run_frontend dev
 
 QA_CHECK_DIR := ./api/ ./tests/
 QA_EXCLUDE_DIR := ./notebook/
@@ -23,19 +23,16 @@ clean:
 	rm -rf .coverage*
 	rm -f $(OPENAPI_JSON)
 
-generate-openapi:
+generate_openapi:
 	uv run python -c "import json; from api.main import app; print(json.dumps(app.openapi(), indent=2))" > $(OPENAPI_JSON)
 	cd frontend && pnpm dlx openapi-typescript openapi.json -o lib/openapi.generated.ts
 	rm -f $(OPENAPI_JSON)
 	@echo "Updated $(OPENAPI_TS)"
 
 
-run_backend:
+run_backend :
 	set -a; source .env; set +a; uv run uvicorn api.main:app --reload --host 0.0.0.0 --port 9000
 
 run_frontend:
 	cd frontend && pnpm dev
-
-dev:
-	@echo "Run 'make run_backend_dev' and 'make run_frontend_dev' in separate terminals"
-
+	
