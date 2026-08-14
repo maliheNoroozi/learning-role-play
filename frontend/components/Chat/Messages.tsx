@@ -1,13 +1,17 @@
 import { useEffect, useRef } from "react";
-import { DEFAULT_ROLEPLAY } from "@/lib/roleplay-defaults";
 import type { ChatMessage } from "@/lib/types";
 
 type MessagesProps = {
   messages: ChatMessage[];
   isLoading: boolean;
+  aiCharacterName: string;
 };
 
-export default function Messages({ messages, isLoading }: MessagesProps) {
+export default function Messages({
+  messages,
+  isLoading,
+  aiCharacterName,
+}: MessagesProps) {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -34,6 +38,11 @@ export default function Messages({ messages, isLoading }: MessagesProps) {
                         : "w-full rounded-2xl bg-transparent px-4 py-3 text-base leading-6 text-foreground"
                     }
                   >
+                    {!isLearner ? (
+                      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground opacity-70">
+                        {aiCharacterName}
+                      </p>
+                    ) : null}
                     <p className="whitespace-pre-wrap">{message.content}</p>
                   </div>
                 </div>
@@ -46,7 +55,7 @@ export default function Messages({ messages, isLoading }: MessagesProps) {
           <div className="flex justify-start">
             <div className="w-full rounded-2xl bg-transparent px-4 py-3 text-sm text-muted-foreground">
               <p className="text-xs font-medium uppercase tracking-wide opacity-70">
-                {DEFAULT_ROLEPLAY.ai_character_name}
+                {aiCharacterName}
               </p>
               <p className="mt-1">Typing...</p>
             </div>
