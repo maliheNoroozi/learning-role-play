@@ -30,8 +30,9 @@ generate_openapi:
 	@echo "Updated $(OPENAPI_TS)"
 
 
-run_backend :
-	set -a; source .env; set +a; uv run uvicorn api.main:app --reload --host 0.0.0.0 --port 9000
+run_backend:
+	docker compose up -d --wait
+	set -a && source .env && set +a && uv run uvicorn api.main:app --reload --host 0.0.0.0 --port 9000
 
 run_frontend:
 	cd frontend && pnpm dev
