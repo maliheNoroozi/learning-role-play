@@ -12,5 +12,18 @@ services:
       timeout: 3s
       retries: 5
 
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
 volumes:
   redis_data:
+  mongodb_data:
