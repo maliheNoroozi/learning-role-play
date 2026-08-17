@@ -1,13 +1,8 @@
-from api.services.cache.roleplay_cache import (
-    RoleplayCache,
-    RoleplayLockBusyError,
-    RoleplayNotFoundError,
-    get_roleplay_cache,
-)
+from api.services.cache.client import RedisService, get_redis_service
+from api.services.cache.config import redis_config
 
 __all__ = [
-    "RoleplayCache",
-    "RoleplayLockBusyError",
-    "RoleplayNotFoundError",
-    "get_roleplay_cache",
+    "RedisService",
+    "get_redis_service",
+    "redis_config",
 ]
