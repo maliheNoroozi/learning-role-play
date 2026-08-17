@@ -1,4 +1,4 @@
-from api.services.roleplay_service import RoleplayService, get_roleplay_service
+from api.services.roleplay.roleplay_service import RoleplayService, get_roleplay_service
 
 __all__ = [
     "RoleplayService",
