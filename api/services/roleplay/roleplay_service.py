@@ -22,7 +22,7 @@ from api.schemas.roleplay_schemas import (
     RoleplayChatResponse,
     RoleplaySession,
 )
-from api.services.cache.roleplay_cache import get_roleplay_cache
+from api.services.roleplay.roleplay_store import get_roleplay_store
 from api.services.config import (
     CHATGPT_MODEL,
     CHATGPT_TEMPERATURE,
@@ -84,14 +84,14 @@ class RoleplayService:
             strict=True,
         )
         self.graph = self._build_graph()
-        self.cache = get_roleplay_cache()
+        self.store = get_roleplay_store()
 
     def create_roleplay(self, request: CreateRoleplayRequest) -> CreateRoleplayResponse:
         session = RoleplaySession(
             roleplay_id=str(uuid4()),
             **request.model_dump(),
         )
-        self.cache.save_session(session)
+        self.store.save_session(session)
         return CreateRoleplayResponse(roleplay_id=session.roleplay_id)
 
     def evaluate_goals(self, state: State):
@@ -214,8 +214,8 @@ class RoleplayService:
         return builder.compile()
 
     def generate_response(self, request: RoleplayChatRequest) -> RoleplayChatResponse:
-        with self.cache.lock(request.roleplay_id):
-            session = self.cache.get_session(request.roleplay_id)
+        with self.store.lock(request.roleplay_id):
+            session = self.store.get_session(request.roleplay_id)
             if session.should_end:
                 raise RoleplayEndedError(request.roleplay_id)
 
@@ -265,7 +265,7 @@ class RoleplayService:
                 result.get("irrelevant_message_count", session.irrelevant_message_count)
             )
             session.should_end = ending_evaluation.should_end
-            self.cache.save_session(session)
+            self.store.save_session(session)
 
             return RoleplayChatResponse(
                 roleplay_id=session.roleplay_id,

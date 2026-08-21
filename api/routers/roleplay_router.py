@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
 from api.schemas.roleplay_schemas import CreateRoleplayRequest, CreateRoleplayResponse
-from api.services.roleplay_service import get_roleplay_service
+from api.services.roleplay.roleplay_service import get_roleplay_service
 
 roleplay_router = APIRouter(prefix="/roleplays", tags=["roleplays"])
 

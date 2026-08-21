@@ -4,11 +4,8 @@ from contextlib import contextmanager
 from functools import lru_cache
 from typing import Iterator
 
-from redis import Redis
-from redis.exceptions import LockError
-
 from api.schemas.roleplay_schemas import RoleplaySession
-from api.services.cache.config import redis_config
+from api.services.cache.client import RedisLockBusyError, RedisService, get_redis_service
 from api.services.config import (
     ROLEPLAY_LOCK_BLOCKING_TIMEOUT_SECONDS,
     ROLEPLAY_LOCK_TIMEOUT_SECONDS,
@@ -27,18 +24,8 @@ class RoleplayLockBusyError(RuntimeError):
 class RoleplayCache:
     """Redis-backed store for live roleplay session state."""
 
-    def __init__(self, redis_client: Redis | None = None) -> None:
-        if redis_client is not None:
-            self._redis = redis_client
-            return
-
-        self._redis = Redis(
-            host=redis_config.redis_host,
-            port=redis_config.redis_port,
-            db=redis_config.redis_db,
-            password=redis_config.redis_password or None,
-            decode_responses=True,
-        )
+    def __init__(self, redis_service: RedisService | None = None) -> None:
+        self._redis = redis_service or get_redis_service()
 
     @staticmethod
     def _session_key(roleplay_id: str) -> str:
@@ -67,23 +54,15 @@ class RoleplayCache:
     @contextmanager
     def lock(self, roleplay_id: str) -> Iterator[None]:
         """Exclusive lock for one roleplayId across all API workers/servers."""
-        lock = self._redis.lock(
-            name=self._lock_key(roleplay_id),
-            timeout=ROLEPLAY_LOCK_TIMEOUT_SECONDS,
-            blocking_timeout=ROLEPLAY_LOCK_BLOCKING_TIMEOUT_SECONDS,
-            thread_local=False,
-        )
-        acquired = lock.acquire(blocking=True)
-        if not acquired:
-            raise RoleplayLockBusyError(roleplay_id)
         try:
-            yield
-        finally:
-            try:
-                lock.release()
-            except LockError:
-                # Lock expired or was already released; safe to ignore on exit.
-                pass
+            with self._redis.lock(
+                self._lock_key(roleplay_id),
+                timeout=ROLEPLAY_LOCK_TIMEOUT_SECONDS,
+                blocking_timeout=ROLEPLAY_LOCK_BLOCKING_TIMEOUT_SECONDS,
+            ):
+                yield
+        except RedisLockBusyError as exc:
+            raise RoleplayLockBusyError(roleplay_id) from exc
 
 
 @lru_cache
