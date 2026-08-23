@@ -51,7 +51,7 @@ export default function Messages({
           </div>
         ) : null}
 
-        {isLoading ? (
+        {isLoading && messages.at(-1)?.role !== "ai_character" ? (
           <div className="flex justify-start">
             <div className="w-full rounded-2xl bg-transparent px-4 py-3 text-sm text-muted-foreground">
               <p className="text-xs font-medium uppercase tracking-wide opacity-70">
