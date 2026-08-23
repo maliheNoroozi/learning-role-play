@@ -1,0 +1,14 @@
+---
+description: FastAPI backend layering and typing conventions
+globs: api/**/*.py
+alwaysApply: false
+---
+
+# API conventions
+
+- Routers: request parsing, status codes, HTTP errors, response construction.
+- Services: business logic and domain behavior.
+- Pydantic models: request/response contracts.
+- Prefer explicit type hints; avoid returning untyped dicts when a response schema exists.
+- Translate domain exceptions to HTTP errors at the router boundary.
+- Do not make service code depend unnecessarily on FastAPI.
