@@ -1,0 +1,15 @@
+---
+description: Accessibility conventions when building or changing UI
+alwaysApply: true
+---
+
+# Accessibility
+
+- Prefer existing accessible components from the project's UI libraries over recreating equivalent components.
+- Trust accessible library primitives for low-level behavior such as keyboard navigation and focus management.
+- Do not duplicate ARIA, keyboard, or focus behavior already provided by the library.
+- Verify that our usage, composition, content, and customization preserve accessibility.
+- Provide accessible labels and names required by component APIs (including icon-only buttons).
+- Ensure form fields have labels, descriptions, and accessible error messages.
+- Do not remove focus styles without an accessible replacement.
+- Do not rely only on color to communicate state.
