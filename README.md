@@ -11,8 +11,8 @@ Conversation-style practice sessions powered by ChatGPT. Learners set up a scena
 ## How it works
 
 1. The learner submits roleplay setup (scenario, roles, goals, AI character).
-2. `POST /roleplays` creates a session, persists it (MongoDB + Redis), and returns a `roleplay_id`.
-3. Each chat turn sends only `roleplay_id` + `learner_message` to `POST /roleplays/chat`.
+2. `POST /roleplays` creates a session, stores it in Redis, and returns a `roleplay_id`.
+3. Each chat turn streams `roleplay_id` + `learner_message` to `POST /roleplays/chat/stream` (SSE).
 4. A LangGraph pipeline evaluates goals and ending conditions in parallel, then generates either a normal in-character reply or a closing message.
 5. Session state is stored with Redis cache-aside + MongoDB write-through. Concurrent chat turns are serialized with a per-session Redis lock.
 
@@ -25,8 +25,8 @@ Conversation-style practice sessions powered by ChatGPT. Learners set up a scena
 ├── api/
 │   ├── main.py                      # FastAPI app, CORS, /health
 │   ├── routers/
-│   │   ├── roleplay_router.py       # POST /roleplays
-│   │   └── chat_router.py           # POST /roleplays/chat
+│   │   ├── roleplay_router.py  # POST /roleplays
+│   │   └── chat_router.py      # POST /roleplays/chat/stream
 │   ├── schemas/
 │   │   └── roleplay_schemas.py
 │   └── services/
@@ -157,32 +157,33 @@ Response:
 { "roleplay_id": "<uuid>" }
 ```
 
-### Send a chat message
+### Send a chat message (SSE)
 
-`POST /roleplays/chat`
+`POST /roleplays/chat/stream`
 
 ```bash
-curl -X POST http://127.0.0.1:9000/roleplays/chat \
+curl -N -X POST http://127.0.0.1:9000/roleplays/chat/stream \
   -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
   -d '{
     "roleplay_id": "<uuid>",
     "learner_message": "Hi, I am interested in this car. What is your best price?"
   }'
 ```
 
-Response includes `ai_response`, `should_end`, `ending_condition`, and optional `ending_rationale`.
+Streams `token` events as the reply is generated, then a final `done` event with `ai_response`, `should_end`, `ending_condition`, and optional `ending_rationale`. Errors after the stream starts are sent as an `error` event.
 
-| Status | Meaning                             |
-| ------ | ----------------------------------- |
-| 404    | Unknown `roleplay_id`               |
-| 409    | Session already ended, or lock busy |
-| 502    | Upstream / generation failure       |
+| Status / event    | Meaning                                                  |
+| ----------------- | -------------------------------------------------------- |
+| 404               | Unknown `roleplay_id` (pre-stream, or via `error` event) |
+| 409               | Session already ended, or lock busy                      |
+| `error` SSE event | Upstream / generation failure after streaming starts     |
 
 ## Frontend flow
 
 1. Home (`/`) — set up scenario, goals, and AI character.
 2. On create, the app calls `POST /roleplays` and navigates to `/roleplays/[id]/chat`.
-3. Chat sends `roleplay_id` + each learner message to the API and shows the AI reply (and ends the session when `should_end` is true).
+3. Chat streams `roleplay_id` + each learner message via SSE and shows tokens as they arrive (and ends the session when `should_end` is true).
 
 ## Useful Make targets
 
