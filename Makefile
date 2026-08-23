@@ -1,10 +1,28 @@
-.PHONY: ruff_fix_imports ruff_format ruff_lint clean generate_openapi run_backend run_frontend dev
+.PHONY: ruff_fix_imports ruff_format ruff_lint backend_lint frontend_lint clean generate_openapi backend frontend
 
 QA_CHECK_DIR := ./api/ ./tests/
 QA_EXCLUDE_DIR := ./notebook/
 
 OPENAPI_JSON := frontend/openapi.json
 OPENAPI_TS := frontend/lib/openapi.generated.ts
+
+generate_openapi:
+	uv run python -c "import json; from api.main import app; print(json.dumps(app.openapi(), indent=2))" > $(OPENAPI_JSON)
+	cd frontend && pnpm dlx openapi-typescript openapi.json -o lib/openapi.generated.ts
+	rm -f $(OPENAPI_JSON)
+	@echo "Updated $(OPENAPI_TS)"
+
+docker-up:
+	docker compose up -d --wait
+
+docker-down:
+	docker compose down
+
+backend:
+	set -a && source .env && set +a && uv run uvicorn api.main:app --reload --host 0.0.0.0 --port 9000
+
+frontend:
+	cd frontend && pnpm dev
 
 ruff_fix_imports:
 	uv run ruff check --select I --fix $(QA_CHECK_DIR) --exclude $(QA_EXCLUDE_DIR)
@@ -15,6 +33,11 @@ ruff_format:
 ruff_lint:
 	uv run ruff check --fix $(QA_CHECK_DIR) --exclude $(QA_EXCLUDE_DIR)
 	
+backend_lint: ruff_fix_imports ruff_format ruff_lint
+
+frontend_lint:
+	cd frontend && pnpm lint && pnpm exec tsc --noEmit
+
 clean:
 	find . -type f -name "*.DS_Store" -ls -delete
 	find . | grep -E "(__pycache__|\.pyc|\.pyo)" | xargs rm -rf
@@ -22,18 +45,3 @@ clean:
 	find . | grep -E ".ipynb_checkpoints" | xargs rm -rf
 	rm -rf .coverage*
 	rm -f $(OPENAPI_JSON)
-
-generate_openapi:
-	uv run python -c "import json; from api.main import app; print(json.dumps(app.openapi(), indent=2))" > $(OPENAPI_JSON)
-	cd frontend && pnpm dlx openapi-typescript openapi.json -o lib/openapi.generated.ts
-	rm -f $(OPENAPI_JSON)
-	@echo "Updated $(OPENAPI_TS)"
-
-
-run_backend:
-	docker compose up -d --wait
-	set -a && source .env && set +a && uv run uvicorn api.main:app --reload --host 0.0.0.0 --port 9000
-
-run_frontend:
-	cd frontend && pnpm dev
-	

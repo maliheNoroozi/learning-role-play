@@ -1,0 +1,21 @@
+---
+description: Core stack and shared conventions for this repository
+alwaysApply: true
+---
+
+# Project conventions
+
+## Frontend
+
+- TypeScript (no `any`)
+- pnpm
+- Next.js App Router
+- Prefer Server Components
+- Tailwind CSS
+
+## Backend
+
+- Python with uv
+- FastAPI
+- Pydantic schemas for API contracts
+- Keep business logic in services; routers handle HTTP only

@@ -91,7 +91,7 @@ cd frontend && pnpm install
 Start Redis, then the API (port **9000**):
 
 ```bash
-make run_backend
+make backend
 ```
 
 Or manually:
@@ -104,7 +104,7 @@ uv run uvicorn api.main:app --reload --host 0.0.0.0 --port 9000
 Start the frontend (port **3000**):
 
 ```bash
-make run_frontend
+make frontend
 ```
 
 - App: [http://localhost:3000](http://localhost:3000)
@@ -151,11 +151,11 @@ curl -X POST http://127.0.0.1:9000/roleplays/chat \
 
 Response includes `ai_response`, `should_end`, `ending_condition`, and optional `ending_rationale`.
 
-| Status | Meaning |
-|--------|---------|
-| 404 | Unknown `roleplay_id` |
-| 409 | Session already ended, or lock busy |
-| 502 | Upstream / generation failure |
+| Status | Meaning                             |
+| ------ | ----------------------------------- |
+| 404    | Unknown `roleplay_id`               |
+| 409    | Session already ended, or lock busy |
+| 502    | Upstream / generation failure       |
 
 ## Frontend flow
 
@@ -165,9 +165,10 @@ Response includes `ai_response`, `should_end`, `ending_condition`, and optional 
 
 ## Useful Make targets
 
-| Target | Description |
-|--------|-------------|
-| `make run_backend` | Start Redis + API on port 9000 |
-| `make run_frontend` | Start Next.js dev server |
+| Target                  | Description                                                            |
+| ----------------------- | ---------------------------------------------------------------------- |
+| `make backend`          | Start Redis + API on port 9000                                         |
+| `make frontend`         | Start Next.js dev server                                               |
 | `make generate_openapi` | Regenerate `frontend/lib/openapi.generated.ts` from the FastAPI schema |
-| `make ruff_lint` / `ruff_format` | Lint / format Python under `api/` and `tests/` |
+| `make backend_lint`     | Format and lint Python under `api/` and `tests/`                       |
+| `make frontend_lint`    | ESLint + TypeScript check (`tsc --noEmit`) in `frontend/`              |
