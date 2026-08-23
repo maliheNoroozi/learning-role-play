@@ -4,17 +4,17 @@ Conversation-style practice sessions powered by ChatGPT. Learners set up a scena
 
 ## Stack
 
-- **Backend:** FastAPI, LangChain / LangGraph, OpenAI (`gpt-4o-mini`), Redis
+- **Backend:** FastAPI, LangChain / LangGraph, OpenAI (`gpt-4o-mini`), Redis, MongoDB
 - **Frontend:** Next.js (App Router), React, Tailwind CSS, Zod
-- **Tooling:** `uv` (Python), `pnpm` (frontend), Docker Compose (Redis)
+- **Tooling:** `uv` (Python), `pnpm` (frontend), Docker Compose (Redis, MongoDB)
 
 ## How it works
 
 1. The learner submits roleplay setup (scenario, roles, goals, AI character).
-2. `POST /roleplays` creates a session, stores it in Redis, and returns a `roleplay_id`.
+2. `POST /roleplays` creates a session, persists it (MongoDB + Redis), and returns a `roleplay_id`.
 3. Each chat turn sends only `roleplay_id` + `learner_message` to `POST /roleplays/chat`.
 4. A LangGraph pipeline evaluates goals and ending conditions in parallel, then generates either a normal in-character reply or a closing message.
-5. Session state (history, irrelevant-message count, ended flag) is updated in Redis under a per-session lock.
+5. Session state is stored with Redis cache-aside + MongoDB write-through. Concurrent chat turns are serialized with a per-session Redis lock.
 
 **Ending conditions:** `goals_achieved`, `profanity`, `conversation_exhausted`, `irrelevant` (after repeated off-topic messages), or `none`.
 
@@ -23,20 +23,21 @@ Conversation-style practice sessions powered by ChatGPT. Learners set up a scena
 ```
 .
 ├── api/
-│   ├── main.py                 # FastAPI app, CORS, /health
+│   ├── main.py                      # FastAPI app, CORS, /health
 │   ├── routers/
-│   │   ├── roleplay_router.py  # POST /roleplays
-│   │   └── chat_router.py      # POST /roleplays/chat
+│   │   ├── roleplay_router.py       # POST /roleplays
+│   │   └── chat_router.py           # POST /roleplays/chat
 │   ├── schemas/
 │   │   └── roleplay_schemas.py
 │   └── services/
-│       ├── roleplay_service.py # LangGraph roleplay + evaluation
+│       ├── roleplay/                # LangGraph roleplay, cache, repository, store
+│       ├── cache/                   # Redis client + config
+│       ├── database/                # MongoDB client + config
 │       ├── prompts.py
-│       ├── config.py
-│       └── cache/              # Redis session store + locks
-├── frontend/                   # Next.js UI (setup form + chat)
-├── notebook/                   # Research / experiments
-├── docker-compose.yml          # Redis
+│       └── config.py
+├── frontend/                        # Next.js UI (setup form + chat)
+├── notebook/                        # Research / experiments
+├── docker-compose.yml               # Redis + MongoDB
 ├── Makefile
 └── pyproject.toml
 ```
@@ -45,7 +46,7 @@ Conversation-style practice sessions powered by ChatGPT. Learners set up a scena
 
 - Python 3.13+ and [uv](https://docs.astral.sh/uv/)
 - Node.js and [pnpm](https://pnpm.io/)
-- Docker (for Redis)
+- Docker (for Redis and MongoDB)
 - An OpenAI API key
 
 ## Setup
@@ -65,8 +66,16 @@ LANGSMITH_ENDPOINT=
 LANGSMITH_API_KEY=
 LANGSMITH_PROJECT=
 
-# Optional; cache defaults to localhost Redis if unset
-REDIS_URL=redis://localhost:6379/0
+# Optional; defaults to localhost Redis if unset
+REDIS_URL=
+REDIS_DB=
+
+# Optional; defaults to localhost MongoDB / roleplay DB if unset
+MONGODB_HOST=
+MONGODB_PORT=
+MONGODB_DB=
+MONGODB_USER=
+MONGODB_PASSWORD=
 ```
 
 **Frontend env** — in `frontend/`:
@@ -88,7 +97,13 @@ cd frontend && pnpm install
 
 ## Run
 
-Start Redis, then the API (port **9000**):
+Start Redis and MongoDB:
+
+```bash
+make docker-up
+```
+
+Start the API (port **9000**):
 
 ```bash
 make backend
@@ -110,6 +125,12 @@ make frontend
 - App: [http://localhost:3000](http://localhost:3000)
 - API docs: [http://127.0.0.1:9000/docs](http://127.0.0.1:9000/docs)
 - Health: `GET /health` → `{"status":"ok"}`
+
+Stop infrastructure when done:
+
+```bash
+make docker-down
+```
 
 ## API
 
@@ -167,7 +188,9 @@ Response includes `ai_response`, `should_end`, `ending_condition`, and optional 
 
 | Target                  | Description                                                            |
 | ----------------------- | ---------------------------------------------------------------------- |
-| `make backend`          | Start Redis + API on port 9000                                         |
+| `make docker-up`        | Start Redis + MongoDB via Docker Compose                               |
+| `make docker-down`      | Stop Redis + MongoDB                                                   |
+| `make backend`          | Start API on port 9000 (loads `.env`)                                  |
 | `make frontend`         | Start Next.js dev server                                               |
 | `make generate_openapi` | Regenerate `frontend/lib/openapi.generated.ts` from the FastAPI schema |
 | `make backend_lint`     | Format and lint Python under `api/` and `tests/`                       |
