@@ -13,13 +13,51 @@ export type StartSSEOptions = {
   method?: string;
   headers?: HeadersInit;
   body?: BodyInit | null;
-  signal?: AbortSignal;
   onMessage: (message: SSEMessage) => void;
 };
 
-/** Parse a fetch `text/event-stream` body and invoke `onMessage` per event.
- Take the raw streaming HTTP response and turn it into complete SSE messages.
-**/
+function abortError(): DOMException {
+  return new DOMException("The operation was aborted.", "AbortError");
+}
+
+export function createRAFBuffer<T>(onFlush: (items: T[]) => void) {
+  let pending: T[] = [];
+  let frameId: number | null = null;
+
+  const flushNow = () => {
+    if (frameId !== null) {
+      cancelAnimationFrame(frameId);
+      frameId = null;
+    }
+    if (pending.length === 0) return;
+    const batch = pending;
+    pending = [];
+    onFlush(batch);
+  };
+
+  const push = (item: T) => {
+    pending.push(item);
+    if (frameId !== null) return;
+    frameId = requestAnimationFrame(() => {
+      frameId = null;
+      if (pending.length === 0) return;
+      const batch = pending;
+      pending = [];
+      onFlush(batch);
+    });
+  };
+
+  const cancel = () => {
+    if (frameId !== null) {
+      cancelAnimationFrame(frameId);
+      frameId = null;
+    }
+    pending = [];
+  };
+
+  return { push, flushNow, cancel };
+}
+
 export async function consumeSSE(
   response: Response,
   onMessage: (message: SSEMessage) => void,
@@ -56,7 +94,7 @@ export async function consumeSSE(
     while (true) {
       if (signal?.aborted) {
         await reader.cancel();
-        break;
+        throw abortError();
       }
 
       const { done, value } = await reader.read();
@@ -90,9 +128,6 @@ export async function consumeSSE(
   }
 }
 
-/**
- * Fetch-based SSE helper with abort-on-unmount.
- */
 export default function useSSE() {
   const abortRef = useRef<AbortController | null>(null);
 
@@ -108,10 +143,7 @@ export default function useSSE() {
       stop();
       const controller = new AbortController();
       abortRef.current = controller;
-
-      const signal = options.signal
-        ? AbortSignal.any([controller.signal, options.signal])
-        : controller.signal;
+      const { signal } = controller;
 
       const response = await fetch(options.url, {
         method: options.method ?? "GET",

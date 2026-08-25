@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { ChangeEvent, RefObject, SubmitEvent } from "react";
-import { useSSE } from "@/hooks";
+import { createRAFBuffer, useSSE } from "@/hooks";
 import { API_URL } from "@/lib/constants";
 import type {
   ChatMessage,
@@ -38,18 +38,32 @@ const initialData: UseChatData = {
   endingRationale: null,
 };
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function upsertAiMessage(
+  messages: ChatMessage[],
+  id: string,
+  content: string,
+  append = false,
+): ChatMessage[] {
+  const hasAiMessage = messages.some((item) => item.id === id);
+  if (!hasAiMessage) {
+    return [...messages, { id, role: "ai_character", content }];
+  }
+
+  return messages.map((item) =>
+    item.id === id
+      ? { ...item, content: append ? item.content + content : content }
+      : item,
+  );
+}
+
 export default function useChat(roleplayId: string): UseChatReturn {
   const [data, setData] = useState<UseChatData>(initialData);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const { start, stop } = useSSE();
-
-  useEffect(() => {
-    return () => {
-      abortControllerRef.current?.abort();
-      stop();
-    };
-  }, [stop]);
+  const { start } = useSSE();
 
   const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     setData((prev) => ({ ...prev, input: event.target.value }));
@@ -78,13 +92,19 @@ export default function useChat(roleplayId: string): UseChatReturn {
       error: null,
     }));
 
-    abortControllerRef.current?.abort();
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-
-    let receivedToken = false;
     let completed = false;
+    let aborted = false;
     let streamError: string | null = null;
+
+    const tokenBuffer = createRAFBuffer<string>((texts) => {
+      const text = texts.join("");
+      if (!text) return;
+
+      setData((prev) => ({
+        ...prev,
+        messages: upsertAiMessage(prev.messages, aiMessageId, text, true),
+      }));
+    });
 
     try {
       await start({
@@ -95,77 +115,38 @@ export default function useChat(roleplayId: string): UseChatReturn {
           roleplay_id: roleplayId,
           learner_message: trimmedInput,
         }),
-        signal: abortController.signal,
         onMessage: (message) => {
           if (message.event === "token") {
             const payload = JSON.parse(message.data) as { text?: string };
             const text = payload.text ?? "";
             if (!text) return;
 
-            const isFirstToken = !receivedToken;
-            receivedToken = true;
-
-            setData((prev) => {
-              if (isFirstToken) {
-                return {
-                  ...prev,
-                  messages: [
-                    ...prev.messages,
-                    {
-                      id: aiMessageId,
-                      role: "ai_character",
-                      content: text,
-                    },
-                  ],
-                };
-              }
-
-              return {
-                ...prev,
-                messages: prev.messages.map((item) =>
-                  item.id === aiMessageId
-                    ? { ...item, content: item.content + text }
-                    : item,
-                ),
-              };
-            });
+            tokenBuffer.push(text);
             return;
           }
 
           if (message.event === "done") {
+            tokenBuffer.flushNow();
             const response = JSON.parse(message.data) as RoleplayChatResponse;
             completed = true;
-            setData((prev) => {
-              const hasAiMessage = prev.messages.some(
-                (item) => item.id === aiMessageId,
-              );
-              return {
-                ...prev,
-                messages: hasAiMessage
-                  ? prev.messages.map((item) =>
-                      item.id === aiMessageId
-                        ? { ...item, content: response.ai_response }
-                        : item,
-                    )
-                  : [
-                      ...prev.messages,
-                      {
-                        id: aiMessageId,
-                        role: "ai_character",
-                        content: response.ai_response,
-                      },
-                    ],
-                isLoading: false,
-                error: null,
-                shouldEnd: response.should_end,
-                endingCondition: response.ending_condition,
-                endingRationale: response.ending_rationale,
-              };
-            });
+            setData((prev) => ({
+              ...prev,
+              messages: upsertAiMessage(
+                prev.messages,
+                aiMessageId,
+                response.ai_response,
+              ),
+              isLoading: false,
+              error: null,
+              shouldEnd: response.should_end,
+              endingCondition: response.ending_condition,
+              endingRationale: response.ending_rationale,
+            }));
             return;
           }
 
           if (message.event === "error") {
+            tokenBuffer.flushNow();
             const payload = JSON.parse(message.data) as { detail?: string };
             streamError =
               payload.detail ?? "Something went wrong. Please try again.";
@@ -178,6 +159,7 @@ export default function useChat(roleplayId: string): UseChatReturn {
       }
 
       if (!completed) {
+        tokenBuffer.flushNow();
         setData((prev) => ({
           ...prev,
           isLoading: false,
@@ -185,7 +167,10 @@ export default function useChat(roleplayId: string): UseChatReturn {
         }));
       }
     } catch (submitError) {
-      if (abortController.signal.aborted) return;
+      if (isAbortError(submitError)) {
+        aborted = true;
+        return;
+      }
 
       setData((prev) => ({
         ...prev,
@@ -196,7 +181,8 @@ export default function useChat(roleplayId: string): UseChatReturn {
         isLoading: false,
       }));
     } finally {
-      if (!abortController.signal.aborted) {
+      tokenBuffer.cancel();
+      if (!aborted) {
         inputRef.current?.focus();
       }
     }
