@@ -1,4 +1,5 @@
 import os
+from collections.abc import Iterator
 from functools import lru_cache
 from typing import Annotated
 from uuid import uuid4
@@ -40,6 +41,11 @@ class RoleplayEndedError(RuntimeError):
     """Raised when a learner tries to chat in an already-ended session."""
 
 
+GENERATE_NODES = frozenset(
+    {"generate_normal_response", "generate_ending_response"}
+)
+
+
 class State(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
     scenario: str
@@ -72,7 +78,7 @@ class RoleplayService:
             model=model,
             temperature=0,
             api_key=api_key,
-        )
+        ).with_config({"tags": ["nostream"]})
         self.goals_evaluator_llm = evaluator_base.with_structured_output(
             RawGoalsEvaluation,
             method="json_schema",
@@ -213,71 +219,142 @@ class RoleplayService:
         builder.add_edge("generate_ending_response", END)
         return builder.compile()
 
-    def generate_response(self, request: RoleplayChatRequest) -> RoleplayChatResponse:
+    def generate_response_stream(
+        self, request: RoleplayChatRequest
+    ) -> Iterator[tuple[str, dict]]:
+        """Stream AI tokens via LangGraph `messages` mode, then emit done."""
         with self.store.lock(request.roleplay_id):
             session = self.store.get_session(request.roleplay_id)
             if session.should_end:
                 raise RoleplayEndedError(request.roleplay_id)
 
-            messages = self._to_langchain_messages(session.conversation_history)
-            messages.append(HumanMessage(content=request.learner_message))
+            messages = self._messages_for_turn(session, request.learner_message)
+            ai_parts: list[str] = []
+            final_state: State | dict | None = None
 
-            result = self.graph.invoke(
-                {
-                    "messages": messages,
-                    "scenario": session.scenario,
-                    "learner_role": session.learner_role,
-                    "learner_goals": session.learner_goals,
-                    "ai_character_name": session.ai_character_name,
-                    "ai_character_role": session.ai_character_role,
-                    "ai_character_personality": session.ai_character_personality,
-                    "irrelevant_message_count": session.irrelevant_message_count,
-                    "all_goals_achieved": False,
-                }
-            )
+            for chunk in self.graph.stream(
+                self._graph_input(session, messages),
+                stream_mode=["messages", "values"],
+                version="v2",
+            ):
+                if chunk["type"] == "messages":
+                    message_chunk, metadata = chunk["data"]
+                    if metadata.get("langgraph_node") not in GENERATE_NODES:
+                        continue
+                    text = RoleplayService._chunk_text(message_chunk)
+                    if text:
+                        ai_parts.append(text)
+                        yield ("token", {"text": text})
+                elif chunk["type"] == "values":
+                    final_state = chunk["data"]
 
-            ai_response = result.get("ai_response", "")
+            if final_state is None:
+                raise RuntimeError("Graph stream completed without a final state.")
 
-            ending_evaluation = result.get("ending_evaluation")
-            if not isinstance(ending_evaluation, EndingEvaluation):
-                ending_evaluation = EndingEvaluation(
-                    learner_used_profanity=False,
-                    conversation_exhausted=False,
-                    learner_message_irrelevant=False,
-                    rationale="",
-                    should_end=False,
-                    ending_condition="none",
-                )
-
-            session.conversation_history.extend(
-                [
-                    ConversationMessage(
-                        role="learner",
-                        content=request.learner_message,
-                    ),
-                    ConversationMessage(
-                        role="ai_character",
-                        content=ai_response,
-                    ),
-                ]
-            )
-            session.irrelevant_message_count = int(
-                result.get("irrelevant_message_count", session.irrelevant_message_count)
-            )
-            session.should_end = ending_evaluation.should_end
-            self.store.save_session(session)
-
-            return RoleplayChatResponse(
-                roleplay_id=session.roleplay_id,
+            ai_response = "".join(ai_parts) or str(final_state.get("ai_response", ""))
+            response = self._persist_turn(
+                session,
+                learner_message=request.learner_message,
                 ai_response=ai_response,
-                should_end=ending_evaluation.should_end,
-                ending_condition=ending_evaluation.ending_condition,
-                ending_rationale=(
-                    ending_evaluation.rationale
-                    if ending_evaluation.should_end
-                    else None
-                ),
+                result=final_state,
             )
+            yield ("done", response.model_dump())
+
+    @staticmethod
+    def _chunk_text(message_chunk: object) -> str:
+        content = getattr(message_chunk, "content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, str):
+                    parts.append(block)
+                elif isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(str(block.get("text", "")))
+                else:
+                    text = getattr(block, "text", None)
+                    if isinstance(text, str):
+                        parts.append(text)
+            return "".join(parts)
+        return str(content) if content else ""
+
+    @staticmethod
+    def _messages_for_turn(
+        session: RoleplaySession, learner_message: str
+    ) -> list[HumanMessage | AIMessage]:
+        messages = RoleplayService._to_langchain_messages(session.conversation_history)
+        messages.append(HumanMessage(content=learner_message))
+        return messages
+
+    @staticmethod
+    def _graph_input(
+        session: RoleplaySession, messages: list[AnyMessage]
+    ) -> State:
+        return {
+            "messages": messages,
+            "scenario": session.scenario,
+            "learner_role": session.learner_role,
+            "learner_goals": session.learner_goals,
+            "ai_character_name": session.ai_character_name,
+            "ai_character_role": session.ai_character_role,
+            "ai_character_personality": session.ai_character_personality,
+            "irrelevant_message_count": session.irrelevant_message_count,
+            "all_goals_achieved": False,
+        }
+
+    @staticmethod
+    def _coerce_ending_evaluation(value: object) -> EndingEvaluation:
+        if isinstance(value, EndingEvaluation):
+            return value
+        return EndingEvaluation(
+            learner_used_profanity=False,
+            conversation_exhausted=False,
+            learner_message_irrelevant=False,
+            rationale="",
+            should_end=False,
+            ending_condition="none",
+        )
+
+    def _persist_turn(
+        self,
+        session: RoleplaySession,
+        *,
+        learner_message: str,
+        ai_response: str,
+        result: State | dict,
+    ) -> RoleplayChatResponse:
+        ending_evaluation = self._coerce_ending_evaluation(
+            result.get("ending_evaluation")
+        )
+
+        session.conversation_history.extend(
+            [
+                ConversationMessage(
+                    role="learner",
+                    content=learner_message,
+                ),
+                ConversationMessage(
+                    role="ai_character",
+                    content=ai_response,
+                ),
+            ]
+        )
+        session.irrelevant_message_count = int(
+            result.get("irrelevant_message_count", session.irrelevant_message_count)
+        )
+        session.should_end = ending_evaluation.should_end
+        self.store.save_session(session)
+
+        return RoleplayChatResponse(
+            roleplay_id=session.roleplay_id,
+            ai_response=ai_response,
+            should_end=ending_evaluation.should_end,
+            ending_condition=ending_evaluation.ending_condition,
+            ending_rationale=(
+                ending_evaluation.rationale if ending_evaluation.should_end else None
+            ),
+        )
 
     @staticmethod
     def _ending_from_goals() -> EndingEvaluation:

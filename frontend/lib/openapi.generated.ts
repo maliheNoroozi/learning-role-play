@@ -4,7 +4,7 @@
  */
 
 export interface paths {
-    "/roleplay/chat": {
+    "/roleplays": {
         parameters: {
             query?: never;
             header?: never;
@@ -13,8 +13,28 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Chat */
-        post: operations["chat_roleplay_chat_post"];
+        /** Create Roleplay */
+        post: operations["create_roleplay_roleplays_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/roleplays/chat/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Chat Stream
+         * @description Stream the AI reply as SSE (`token` events, then a final `done` event).
+         */
+        post: operations["chat_stream_roleplays_chat_stream_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -42,33 +62,23 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** ConversationMessage */
-        ConversationMessage: {
-            /**
-             * Role
-             * @description Speaker role: 'learner' or 'ai_character'.
-             * @enum {string}
-             */
-            role: "learner" | "ai_character";
-            /**
-             * Content
-             * @description Message content for this turn.
-             */
-            content: string;
-        };
-        /** HTTPValidationError */
-        HTTPValidationError: {
-            /** Detail */
-            detail?: components["schemas"]["ValidationError"][];
-        };
-        /** RoleplayRequest */
-        RoleplayRequest: {
+        /**
+         * CreateRoleplayRequest
+         * @description Start a new practice session: send setup only.
+         */
+        CreateRoleplayRequest: {
             /**
              * Scenario
              * @description The roleplay scenario and setting.
              * @example You are at a car dealership negotiating the price of a used sedan.
              */
             scenario: string;
+            /**
+             * Learner Role
+             * @description The role the learner is playing.
+             * @example A first-time car buyer
+             */
+            learner_role: string;
             /**
              * Learner Goals
              * @description Goals the learner should practice during the roleplay.
@@ -78,18 +88,6 @@ export interface components {
              *     ]
              */
             learner_goals: string[];
-            /**
-             * Learner Role
-             * @description The role the learner is playing.
-             * @example A first-time car buyer
-             */
-            learner_role: string;
-            /**
-             * Learner Message
-             * @description The learner's latest message in the conversation.
-             * @example Hi, I'm interested in this car. What's your best price?
-             */
-            learner_message: string;
             /**
              * Ai Character Name
              * @description Name of the AI character.
@@ -108,40 +106,39 @@ export interface components {
              * @example Friendly but persuasive, focused on closing the deal.
              */
             ai_character_personality: string;
-            /**
-             * Conversation History
-             * @description Prior turns in the conversation, oldest first.
-             */
-            conversation_history?: components["schemas"]["ConversationMessage"][];
         };
-        /** RoleplayResponse */
-        RoleplayResponse: {
+        /**
+         * CreateRoleplayResponse
+         * @description Returned after a session is created.
+         */
+        CreateRoleplayResponse: {
             /**
-             * Ai Character Name
-             * @description Name of the AI character that responded.
+             * Roleplay Id
+             * @description Id of the newly created roleplay session.
              */
-            ai_character_name: string;
+            roleplay_id: string;
+        };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * RoleplayChatRequest
+         * @description Continue a session: send only the session id and the new learner message.
+         */
+        RoleplayChatRequest: {
             /**
-             * Ai Response
-             * @description The AI character's reply to the learner's message.
+             * Roleplay Id
+             * @description Id of the roleplay session in cache.
              */
-            ai_response: string;
+            roleplay_id: string;
             /**
-             * Should End
-             * @description Whether the roleplay conversation should end.
+             * Learner Message
+             * @description The learner's latest message in the conversation.
+             * @example Hi, I'm interested in this car. What's your best price?
              */
-            should_end: boolean;
-            /**
-             * Ending Condition
-             * @description Primary reason the conversation should end, or 'none'.
-             * @enum {string}
-             */
-            ending_condition: "goals_achieved" | "profanity" | "conversation_exhausted" | "irrelevant" | "none";
-            /**
-             * Ending Rationale
-             * @description Brief explanation of the ending evaluation.
-             */
-            ending_rationale: string;
+            learner_message: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -165,7 +162,7 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    chat_roleplay_chat_post: {
+    create_roleplay_roleplays_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -174,7 +171,40 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RoleplayRequest"];
+                "application/json": components["schemas"]["CreateRoleplayRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateRoleplayResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    chat_stream_roleplays_chat_stream_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoleplayChatRequest"];
             };
         };
         responses: {
@@ -184,7 +214,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RoleplayResponse"];
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
