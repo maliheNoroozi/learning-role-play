@@ -9,7 +9,10 @@ from api.services.roleplay.roleplay_cache import (
     RoleplayLockBusyError,
     RoleplayNotFoundError,
 )
-from api.services.roleplay.roleplay_service import RoleplayEndedError, get_roleplay_service
+from api.services.roleplay.roleplay_service import (
+    RoleplayEndedError,
+    get_roleplay_service,
+)
 
 chat_router = APIRouter(prefix="/roleplays", tags=["chat"])
 

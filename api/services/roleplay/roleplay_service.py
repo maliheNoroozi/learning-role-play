@@ -23,7 +23,6 @@ from api.schemas.roleplay_schemas import (
     RoleplayChatResponse,
     RoleplaySession,
 )
-from api.services.roleplay.roleplay_store import get_roleplay_store
 from api.services.config import (
     CHATGPT_MODEL,
     CHATGPT_TEMPERATURE,
@@ -35,15 +34,14 @@ from api.services.prompts import (
     ROLEPLAY_ENDING_SYSTEM_PROMPT,
     ROLEPLAY_SYSTEM_PROMPT,
 )
+from api.services.roleplay.roleplay_store import get_roleplay_store
 
 
 class RoleplayEndedError(RuntimeError):
     """Raised when a learner tries to chat in an already-ended session."""
 
 
-GENERATE_NODES = frozenset(
-    {"generate_normal_response", "generate_ending_response"}
-)
+GENERATE_NODES = frozenset({"generate_normal_response", "generate_ending_response"})
 
 
 class State(TypedDict):
@@ -288,9 +286,7 @@ class RoleplayService:
         return messages
 
     @staticmethod
-    def _graph_input(
-        session: RoleplaySession, messages: list[AnyMessage]
-    ) -> State:
+    def _graph_input(session: RoleplaySession, messages: list[AnyMessage]) -> State:
         return {
             "messages": messages,
             "scenario": session.scenario,

@@ -5,7 +5,11 @@ from functools import lru_cache
 from typing import Iterator
 
 from api.schemas.roleplay_schemas import RoleplaySession
-from api.services.cache.client import RedisLockBusyError, RedisService, get_redis_service
+from api.services.cache.client import (
+    RedisLockBusyError,
+    RedisService,
+    get_redis_service,
+)
 from api.services.config import (
     ROLEPLAY_LOCK_BLOCKING_TIMEOUT_SECONDS,
     ROLEPLAY_LOCK_TIMEOUT_SECONDS,
