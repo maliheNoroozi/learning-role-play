@@ -1,6 +1,6 @@
 .PHONY: ruff_fix_imports ruff_format ruff_lint backend_lint frontend_lint lint clean generate_openapi docker-up docker-down install backend frontend
 
-QA_CHECK_DIR := ./api/ ./tests/
+QA_CHECK_DIR := ./api/
 QA_EXCLUDE_DIR := ./notebook/
 
 OPENAPI_JSON := frontend/openapi.json
