@@ -6,15 +6,17 @@ Conversation-style practice sessions powered by ChatGPT. Learners set up a scena
 
 - **Backend:** FastAPI, LangChain / LangGraph, OpenAI (`gpt-4o-mini`), Redis, MongoDB
 - **Frontend:** Next.js (App Router), React, Tailwind CSS, Zod
-- **Tooling:** `uv` (Python), `pnpm` (frontend), Docker Compose (Redis, MongoDB)
+- **Tooling:** `uv` (Python), `pnpm` (frontend), Docker Compose (Redis + MongoDB)
 
 ## How it works
 
 1. The learner submits roleplay setup (scenario, roles, goals, AI character).
-2. `POST /roleplays` creates a session, stores it in Redis, and returns a `roleplay_id`.
+2. `POST /roleplays` creates a session, persists it (MongoDB + Redis), and returns a `roleplay_id`.
 3. Each chat turn streams `roleplay_id` + `learner_message` to `POST /roleplays/chat/stream` (SSE).
-4. A LangGraph pipeline evaluates goals and ending conditions in parallel, then generates either a normal in-character reply or a closing message.
-5. Session state is stored with Redis cache-aside + MongoDB write-through. Concurrent chat turns are serialized with a per-session Redis lock.
+4. A LangGraph pipeline evaluates goals and ending conditions in parallel, then streams either a normal in-character reply or a closing message (`token` events, then a final `done` event).
+5. Session state (history, irrelevant-message count, ended flag) is written through MongoDB and refreshed in Redis under a per-session lock.
+
+**Session storage:** Redis is the hot cache and lock layer; MongoDB is the durable store (cache-aside reads, write-through saves).
 
 **Ending conditions:** `goals_achieved`, `profanity`, `conversation_exhausted`, `irrelevant` (after repeated off-topic messages), or `none`.
 
@@ -25,17 +27,25 @@ Conversation-style practice sessions powered by ChatGPT. Learners set up a scena
 ├── api/
 │   ├── main.py                      # FastAPI app, CORS, /health
 │   ├── routers/
-│   │   ├── roleplay_router.py  # POST /roleplays
-│   │   └── chat_router.py      # POST /roleplays/chat/stream
+│   │   ├── roleplay_router.py       # POST /roleplays
+│   │   └── chat_router.py           # POST /roleplays/chat/stream (SSE)
 │   ├── schemas/
-│   │   └── roleplay_schemas.py
+│   │   └── roleplay_schemas.py      # Request / response / session models
 │   └── services/
-│       ├── roleplay/                # LangGraph roleplay, cache, repository, store
+│       ├── config.py                # Model + roleplay constants
+│       ├── prompts.py
 │       ├── cache/                   # Redis client + config
 │       ├── database/                # MongoDB client + config
-│       ├── prompts.py
-│       └── config.py
-├── frontend/                        # Next.js UI (setup form + chat)
+│       └── roleplay/
+│           ├── roleplay_service.py  # LangGraph roleplay + evaluation
+│           ├── roleplay_store.py    # Cache-aside + write-through facade
+│           ├── roleplay_cache.py    # Redis session + locks
+│           └── roleplay_repository.py  # MongoDB persistence
+├── frontend/
+│   ├── app/                         # App Router pages + server actions
+│   ├── components/                  # Chat, Roleplay form, UI primitives
+│   ├── hooks/                       # useChat, useSSE, form defaults
+│   └── lib/                         # API client, schemas, OpenAPI types
 ├── notebook/                        # Research / experiments
 ├── docker-compose.yml               # Redis + MongoDB
 ├── Makefile
@@ -88,7 +98,7 @@ cp env.example .env.local
 NEXT_PUBLIC_API_URL=http://localhost:9000
 ```
 
-Install dependencies:
+Install dependencies (or use `make install`):
 
 ```bash
 uv sync
@@ -97,7 +107,7 @@ cd frontend && pnpm install
 
 ## Run
 
-Start Redis and MongoDB:
+Start infrastructure (Redis + MongoDB):
 
 ```bash
 make docker-up
@@ -113,6 +123,7 @@ Or manually:
 
 ```bash
 docker compose up -d --wait
+set -a && source .env && set +a
 uv run uvicorn api.main:app --reload --host 0.0.0.0 --port 9000
 ```
 
@@ -126,7 +137,7 @@ make frontend
 - API docs: [http://127.0.0.1:9000/docs](http://127.0.0.1:9000/docs)
 - Health: `GET /health` → `{"status":"ok"}`
 
-Stop infrastructure when done:
+Stop infrastructure:
 
 ```bash
 make docker-down
@@ -157,42 +168,51 @@ Response:
 { "roleplay_id": "<uuid>" }
 ```
 
-### Send a chat message (SSE)
+### Stream a chat message
 
-`POST /roleplays/chat/stream`
+`POST /roleplays/chat/stream` → Server-Sent Events
 
 ```bash
 curl -N -X POST http://127.0.0.1:9000/roleplays/chat/stream \
   -H "Content-Type: application/json" \
-  -H "Accept: text/event-stream" \
   -d '{
     "roleplay_id": "<uuid>",
     "learner_message": "Hi, I am interested in this car. What is your best price?"
   }'
 ```
 
-Streams `token` events as the reply is generated, then a final `done` event with `ai_response`, `should_end`, `ending_condition`, and optional `ending_rationale`. Errors after the stream starts are sent as an `error` event.
+SSE events:
 
-| Status / event    | Meaning                                                  |
-| ----------------- | -------------------------------------------------------- |
-| 404               | Unknown `roleplay_id` (pre-stream, or via `error` event) |
-| 409               | Session already ended, or lock busy                      |
-| `error` SSE event | Upstream / generation failure after streaming starts     |
+| Event | Payload |
+|-------|---------|
+| `token` | `{ "text": "<chunk>" }` — streamed AI text |
+| `done` | Full turn result: `ai_response`, `should_end`, `ending_condition`, optional `ending_rationale` |
+| `error` | `{ "detail": "..." }` — failure during the stream |
+
+| Status / case | Meaning |
+|---------------|---------|
+| 404 | Unknown `roleplay_id` |
+| 409 | Session already ended, or lock busy |
+| 500 | Missing `OPENAI_API_KEY` |
+| 502 / `error` event | Upstream / generation failure |
 
 ## Frontend flow
 
 1. Home (`/`) — set up scenario, goals, and AI character.
 2. On create, the app calls `POST /roleplays` and navigates to `/roleplays/[id]/chat`.
-3. Chat streams `roleplay_id` + each learner message via SSE and shows tokens as they arrive (and ends the session when `should_end` is true).
+3. Chat streams each learner message to `POST /roleplays/chat/stream`, renders tokens as they arrive, and ends the session when `should_end` is true.
 
 ## Useful Make targets
 
-| Target                  | Description                                                            |
-| ----------------------- | ---------------------------------------------------------------------- |
-| `make docker-up`        | Start Redis + MongoDB via Docker Compose                               |
-| `make docker-down`      | Stop Redis + MongoDB                                                   |
-| `make backend`          | Start API on port 9000 (loads `.env`)                                  |
-| `make frontend`         | Start Next.js dev server                                               |
+| Target | Description |
+|--------|-------------|
+| `make install` | `uv sync` + frontend `pnpm install` |
+| `make docker-up` | Start Redis + MongoDB |
+| `make docker-down` | Stop Docker Compose services |
+| `make backend` | Start API on port 9000 (loads `.env`) |
+| `make frontend` | Start Next.js dev server |
 | `make generate_openapi` | Regenerate `frontend/lib/openapi.generated.ts` from the FastAPI schema |
-| `make backend_lint`     | Format and lint Python under `api/` and `tests/`                       |
-| `make frontend_lint`    | ESLint + TypeScript check (`tsc --noEmit`) in `frontend/`              |
+| `make lint` | Frontend lint/typecheck + backend Ruff |
+| `make backend_lint` | Ruff import fix, format, and lint under `api/` |
+| `make frontend_lint` | ESLint + `tsc --noEmit` in `frontend/` |
+| `make clean` | Remove caches, checkpoints, and temp OpenAPI JSON |
