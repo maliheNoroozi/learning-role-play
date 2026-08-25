@@ -20,44 +20,6 @@ function abortError(): DOMException {
   return new DOMException("The operation was aborted.", "AbortError");
 }
 
-export function createRAFBuffer<T>(onFlush: (items: T[]) => void) {
-  let pending: T[] = [];
-  let frameId: number | null = null;
-
-  const flushNow = () => {
-    if (frameId !== null) {
-      cancelAnimationFrame(frameId);
-      frameId = null;
-    }
-    if (pending.length === 0) return;
-    const batch = pending;
-    pending = [];
-    onFlush(batch);
-  };
-
-  const push = (item: T) => {
-    pending.push(item);
-    if (frameId !== null) return;
-    frameId = requestAnimationFrame(() => {
-      frameId = null;
-      if (pending.length === 0) return;
-      const batch = pending;
-      pending = [];
-      onFlush(batch);
-    });
-  };
-
-  const cancel = () => {
-    if (frameId !== null) {
-      cancelAnimationFrame(frameId);
-      frameId = null;
-    }
-    pending = [];
-  };
-
-  return { push, flushNow, cancel };
-}
-
 export async function consumeSSE(
   response: Response,
   onMessage: (message: SSEMessage) => void,
@@ -74,6 +36,7 @@ export async function consumeSSE(
   let dataLines: string[] = [];
   let id: string | undefined;
 
+  /* We reached the blank line that ends an SSE event. Deliver the completed event. */
   const dispatch = () => {
     if (dataLines.length === 0) {
       eventName = "message";

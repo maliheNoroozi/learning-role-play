@@ -2,8 +2,9 @@
 
 import { useRef, useState } from "react";
 import type { ChangeEvent, RefObject, SubmitEvent } from "react";
-import { createRAFBuffer, useSSE } from "@/hooks";
+import { useSSE } from "@/hooks";
 import { API_URL } from "@/lib/constants";
+import { createRAFBuffer } from "@/lib/createRAFBuffer";
 import type {
   ChatMessage,
   EndingCondition,
