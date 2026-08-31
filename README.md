@@ -1,6 +1,6 @@
 # Learning Roleplay
 
-Conversation-style practice sessions powered by ChatGPT. Learners set up a scenario, role, goals, and AI character, then chat while the backend tracks progress, conversation state, and ending conditions.
+Practice real conversations with an AI character. Set a scenario, your role, and goals — then chat until you achieve them or the session ends.
 
 ## Stack
 
